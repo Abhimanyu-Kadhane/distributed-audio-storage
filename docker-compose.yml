@@ -1,0 +1,156 @@
+# Named volumes — each node and the gateway get isolated persistent storage
+volumes:
+  gateway-data:
+  node1-data:
+  node2-data:
+  node3-data:
+  node4-data:
+
+services:
+
+  # -----------------------------------------------------------------------
+  # Storage nodes (4 identical images, different NODE_ID and volume)
+  # LAB TOPIC 1: RPC — each node exposes a REST HTTP interface
+  # LAB TOPIC 2: multithreading — uvicorn threadpool handles concurrent PUT/GET
+  # -----------------------------------------------------------------------
+  node1:
+    build:
+      context: ./node
+    environment:
+      NODE_ID: "1"
+      DATA_DIR: /data/chunks
+      PEERS: "1=http://node1:8000,2=http://node2:8000,3=http://node3:8000,4=http://node4:8000"
+      GATEWAY_URL: "http://gateway:8000"
+      HEARTBEAT_INTERVAL_SECONDS: "2"
+      LEADER_TIMEOUT_SECONDS: "6"
+      ELECTION_TIMEOUT_SECONDS: "2"
+    volumes:
+      - node1-data:/data
+    ports:
+      - "8001:8000" # host port 8001 for debugging
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  node2:
+    build:
+      context: ./node
+    environment:
+      NODE_ID: "2"
+      DATA_DIR: /data/chunks
+      PEERS: "1=http://node1:8000,2=http://node2:8000,3=http://node3:8000,4=http://node4:8000"
+      GATEWAY_URL: "http://gateway:8000"
+      HEARTBEAT_INTERVAL_SECONDS: "2"
+      LEADER_TIMEOUT_SECONDS: "6"
+      ELECTION_TIMEOUT_SECONDS: "2"
+    volumes:
+      - node2-data:/data
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  node3:
+    build:
+      context: ./node
+    environment:
+      NODE_ID: "3"
+      DATA_DIR: /data/chunks
+      PEERS: "1=http://node1:8000,2=http://node2:8000,3=http://node3:8000,4=http://node4:8000"
+      GATEWAY_URL: "http://gateway:8000"
+      HEARTBEAT_INTERVAL_SECONDS: "2"
+      LEADER_TIMEOUT_SECONDS: "6"
+      ELECTION_TIMEOUT_SECONDS: "2"
+    volumes:
+      - node3-data:/data
+    ports:
+      - "8003:8000"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  node4:
+    build:
+      context: ./node
+    environment:
+      NODE_ID: "4"
+      DATA_DIR: /data/chunks
+      PEERS: "1=http://node1:8000,2=http://node2:8000,3=http://node3:8000,4=http://node4:8000"
+      GATEWAY_URL: "http://gateway:8000"
+      HEARTBEAT_INTERVAL_SECONDS: "2"
+      LEADER_TIMEOUT_SECONDS: "6"
+      ELECTION_TIMEOUT_SECONDS: "2"
+    volumes:
+      - node4-data:/data
+    ports:
+      - "8004:8000"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # -----------------------------------------------------------------------
+  # Gateway — public API, chunking, metadata, health monitor
+  # LAB TOPIC 2: multithreading — ThreadPoolExecutor for parallel transfers
+  # LAB TOPIC 6: load balancing — round-robin node selection
+  # -----------------------------------------------------------------------
+  gateway:
+    build:
+      context: ./gateway
+    environment:
+      NODES: "1=http://node1:8000,2=http://node2:8000,3=http://node3:8000,4=http://node4:8000"
+      CHUNK_SIZE_BYTES: "524288"
+      REPLICATION_FACTOR: "2"
+      LB_ALGORITHM: "least_loaded"
+      MAX_WORKERS: "8"
+      MAX_UPLOAD_BYTES: "52428800"
+      DB_PATH: /data/metadata.db
+      HEALTH_INTERVAL_SECONDS: "2"
+      HEALTH_FAIL_THRESHOLD: "2"
+      REQUEST_CONNECT_TIMEOUT: "2"
+      REQUEST_READ_TIMEOUT: "10"
+    volumes:
+      - gateway-data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
+      node4:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+
+  # -----------------------------------------------------------------------
+  # Frontend — Streamlit UI
+  # -----------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      GATEWAY_URL: "http://gateway:8000"
+    ports:
+      - "8501:8501"
+    depends_on:
+      gateway:
+        condition: service_healthy

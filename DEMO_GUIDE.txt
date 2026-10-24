@@ -1,0 +1,326 @@
+================================================================================
+DISTRIBUTED AUDIO FILE STORAGE SYSTEM — PROJECT DEMONSTRATION & REVIEW GUIDE
+================================================================================
+
+This document provides a complete, step-by-step walkthrough to present this project
+to your project evaluator or reviewer, explaining each concept demonstrated,
+exact clicks to perform, and detailed instructions on how to push the codebase to GitHub.
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+1. Project Summary & Concepts Demonstrated
+2. Pre-Demo Setup & Verification
+3. Step-by-Step Live Demonstration Script
+   - Step 1: Cluster Architecture & Leader Identification (Bully Election & RPC)
+   - Step 2: Upload, Chunking & Load Balancing Placement (Parallel I/O & Load Balancing)
+   - Step 3: Synchronous Primary-Backup Replication (Replication Factor = 2)
+   - Step 4: Lamport Logical Clocks & Version Conflict Resolution (Last-Writer-Wins)
+   - Step 5: Node Crash, Transparent Failover & Primary Promotion (Fault Tolerance)
+   - Step 6: Leader Crash, Bully Re-Election & Automatic Repair (Bully & Self-Healing)
+   - Step 7: Automated Test Suite Execution (All 3 Phases Passing)
+4. Viva Q&A Cheat Sheet (Short, High-Impact Answers)
+5. How to Upload the Project to GitHub
+
+
+================================================================================
+1. PROJECT SUMMARY & CONCEPTS DEMONSTRATED
+================================================================================
+
+The project is an enterprise-grade Distributed Audio File Storage System designed
+for academic evaluation in Distributed Systems.
+
+Key Distributed Systems Concepts Covered:
+- LAB TOPIC 1: Client-Server RPC via REST/HTTP (FastAPI endpoints, requests client)
+- LAB TOPIC 2: Multithreading & Concurrency (ThreadPoolExecutor for parallel uploads/downloads,
+               thread-safe in-memory counters with Lock)
+- LAB TOPIC 3: Lamport Logical Clocks & Versioning (Header propagation, scalar clock,
+               deterministic Last-Writer-Wins conflict resolution)
+- LAB TOPIC 4: Bully Leader Election (Nodes 1..4 elect highest alive ID, watchdog monitors,
+               coordination broadcasts, higher node recovery reclaim)
+- LAB TOPIC 5: Synchronous Primary-Backup Replication (REPLICATION_FACTOR = 2, primary stores
+               then forwards to backup before acking gateway)
+- LAB TOPIC 6: Load Balancing (Least-loaded chunk placement with in-flight reservations;
+               read replica selection by lowest active load)
+- LAB TOPIC 8: Fault Tolerance & Self-Healing (In-memory crash simulation, gateway primary
+               promotion in 1 transaction, leader failure detector, 5s repair loop)
+
+
+================================================================================
+2. PRE-DEMO SETUP & VERIFICATION
+================================================================================
+
+Before your reviewer arrives, ensure everything is clean and running:
+
+1. Open a terminal in the project directory:
+   cd /Users/abhimanyu/DC-Project/audio-storage
+
+2. Start all services in Docker (detached mode):
+   docker compose up --build -d
+
+3. Verify that all 6 containers are healthy:
+   docker compose ps
+
+   You should see:
+   - audio-storage-gateway-1   (port 8000)
+   - audio-storage-frontend-1  (port 8501)
+   - audio-storage-node1-1     (port 8001)
+   - audio-storage-node2-1     (port 8002)
+   - audio-storage-node3-1     (port 8003)
+   - audio-storage-node4-1     (port 8004)
+
+4. Open the Web Browser:
+   Navigate to: http://localhost:8501 (Streamlit Frontend)
+   Optionally open: http://localhost:8000/docs (Gateway Swagger REST API)
+
+
+================================================================================
+3. STEP-BY-STEP LIVE DEMONSTRATION SCRIPT
+================================================================================
+
+--------------------------------------------------------------------------------
+STEP 1: Cluster Architecture & Leader Identification
+--------------------------------------------------------------------------------
+* CONCEPT: Lab Topic 1 (RPC) & Lab Topic 4 (Bully Leader Election)
+* WHAT TO DO:
+  1. Open http://localhost:8501 and click on the "🖥️ Cluster" tab.
+  2. Point out the top metrics cards:
+     - Replication Factor: 2
+     - Load Balancer: LEAST_LOADED
+     - Under-Replicated Chunks: 0
+     - Healthy Nodes: 4 / 4
+     - Cluster Leader: 👑 Node 4
+  3. Scroll down to the storage nodes cards. Point out that Node 4 has the purple
+     "👑 CLUSTER LEADER" badge because Bully election elected the highest active ID (4).
+* WHAT TO TELL THE REVIEWER:
+  "Our cluster comprises 4 independent storage node services and 1 central metadata gateway.
+   Upon startup, the storage nodes ran a classic Bully Election algorithm. Node 4, having the
+   highest node ID (4 > 3 > 2 > 1), won the election, declared itself coordinator to all peers,
+   and now acts as the cluster leader responsible for health monitoring and repairs."
+
+--------------------------------------------------------------------------------
+STEP 2: Upload, Chunking & Load Balancing Placement
+--------------------------------------------------------------------------------
+* CONCEPT: Lab Topic 1 (RPC), Lab Topic 2 (Multithreading), Lab Topic 6 (Load Balancing)
+* WHAT TO DO:
+  1. Switch to the "📁 Files" tab.
+  2. Use the file uploader to select an audio file (e.g. any .mp3 or .wav of ~2–3 MB).
+  3. Click "⬆️ Upload".
+  4. Notice the success message stating that the file was split into 512 KB chunks
+     and committed to the cluster.
+  5. Switch immediately to the "🖥️ Cluster" tab and look at the "Chunk Distribution" bar chart.
+* WHAT TO TELL THE REVIEWER:
+  "When a client uploads audio, the gateway splits the raw stream into 512 KB fixed-size
+   chunks. Using a multithreaded ThreadPoolExecutor, chunks are placed in parallel across
+   storage nodes using the 'least_loaded' load-balancing algorithm. Notice the bar chart:
+   the gateway maintains thread-safe in-flight reservations under a Lock so that parallel
+   chunks are distributed evenly rather than piling up on a single node."
+
+--------------------------------------------------------------------------------
+STEP 3: Synchronous Primary-Backup Replication (RF = 2)
+--------------------------------------------------------------------------------
+* CONCEPT: Lab Topic 5 (Replication) & Lab Topic 1 (RPC Forwarding)
+* WHAT TO DO:
+  1. In the "📁 Files" tab, expand "🗂️ Chunk map" under the uploaded audio file.
+  2. Show the reviewer the table:
+     - Notice that every chunk has replicas on 2 distinct nodes (e.g., Node 1 and Node 2).
+     - Exactly one node is marked '(primary)' and the other is '(backup)'.
+  3. Click on the "📜 Event Log" tab to show the audit trail with 'chunk placed' events.
+* WHAT TO TELL THE REVIEWER:
+  "We implement synchronous primary-backup replication with a replication factor of 2.
+   For each chunk, the gateway selects a primary and a backup. The gateway sends the chunk
+   exclusively to the primary node. The primary validates the SHA-256 checksum, stores it
+   atomically to its volume, and synchronously forwards the chunk to the backup node via
+   RPC before acknowledging success back to the gateway. This guarantees zero stale replicas."
+
+--------------------------------------------------------------------------------
+STEP 4: Lamport Logical Clocks & Version Conflict Resolution
+--------------------------------------------------------------------------------
+* CONCEPT: Lab Topic 3 (Lamport Logical Clocks & Deterministic Conflict Resolution)
+* WHAT TO DO:
+  1. Open the left Sidebar.
+  2. Under '👤 Client Identity', select 'Client A'.
+  3. Check '🛠️ Override next upload timestamp' and enter '10'.
+  4. In the '📁 Files' tab, upload an audio file named 'song.mp3'.
+  5. Now open the Sidebar. Select 'Client B'.
+  6. Check 'Override next upload timestamp' and enter '5' (a lower logical timestamp).
+  7. Upload a different audio file, but also name it 'song.mp3' (simulating concurrent edit).
+  8. Uncheck 'Show all versions' in the Files tab.
+  9. Point out: Client A's file remains the '🏷️ LATEST' version even though Client B's
+     upload arrived later in real wall-clock time!
+  10. Now select Client B, set timestamp override to '11', and upload 'song.mp3' again.
+  11. Notice that Client B's file now immediately takes over as the '🏷️ LATEST' version.
+* WHAT TO TELL THE REVIEWER:
+  "Distributed systems cannot rely on synchronized physical wall clocks due to clock drift.
+   We implemented scalar Lamport Logical Clocks on both gateway and storage nodes, propagating
+   timestamps across HTTP headers (X-Lamport-Time). To resolve versioning conflicts between
+   clients concurrently uploading files with the same name, we use deterministic Last-Writer-Wins
+   ordering by comparing (lamport_timestamp, client_id, file_id) lexicographically. Here,
+   Client A's write (timestamp 10) won over Client B's later-arriving write (timestamp 5),
+   and Client B only took over when it advanced its clock to 11."
+
+--------------------------------------------------------------------------------
+STEP 5: Node Crash, Transparent Failover & Primary Promotion
+--------------------------------------------------------------------------------
+* CONCEPT: Lab Topic 8 (Fault Tolerance, Failover, Primary Promotion, Read Fallback)
+* WHAT TO DO:
+  1. In the "📁 Files" tab, check which node is primary for Chunk 0 of your file (e.g. Node 1).
+  2. Switch to the "🖥️ Cluster" tab.
+  3. On Node 1's card, click the red "💥 Fail" button.
+  4. The card status immediately flips to: '🔴 FAILED (CRASHED)'.
+  5. Switch back to the "📁 Files" tab and click the "▶️ Play" button on that file.
+  6. The audio plays immediately and smoothly without errors!
+  7. Expand the "🗂️ Chunk map": show that Chunk 0's primary has been automatically swapped
+     to the alive backup node!
+  8. Click the "📜 Event Log" tab: show the 'promotion' event ('promoted N chunks from node 1').
+* WHAT TO TELL THE REVIEWER:
+  "When a storage node crashes (simulated cleanly in-memory via /admin/fail), the gateway's
+   health observer immediately runs 'promote_primaries(dead_node_id)'. In a single atomic
+   SQLite transaction, every chunk where the dead node was primary is promoted: the alive
+   backup becomes primary, and the dead node becomes backup. When the client clicks Play,
+   our read load balancer skips dead nodes with zero timeout penalty and serves the chunk
+   from the alive replica seamlessly."
+
+--------------------------------------------------------------------------------
+STEP 6: Leader Crash, Bully Re-Election & Automatic Repair Loop
+--------------------------------------------------------------------------------
+* CONCEPT: Lab Topic 4 (Bully Leader Election) & Lab Topic 8 (Self-Healing Repair Loop)
+* WHAT TO DO:
+  1. In the "🖥️ Cluster" tab, locate Node 4 (which holds the '👑 CLUSTER LEADER' badge).
+  2. Click the red "💥 Fail" button on Node 4!
+  3. Explain to the reviewer:
+     "Watch the status: followers check for leader heartbeats every 1 second. After 6 seconds
+      without heartbeats, follower nodes trigger a Bully election."
+  4. Within 6–10 seconds, watch Node 3 automatically receive the purple "👑 CLUSTER LEADER" badge!
+  5. Point to the top metric card "Under-Replicated Chunks": it has risen above 0 because Node 4
+     is dead and chunks stored on it lost a copy.
+  6. Watch the screen for another 5–15 seconds: the "Under-Replicated Chunks" counter will
+     automatically drop back to 0!
+  7. Click the "📜 Event Log" tab to show:
+     - 'election' events: Node 3 became leader
+     - 'repair' events: Leader instructed alive nodes to pull and re-replicate missing chunks
+  8. Return to the "🖥️ Cluster" tab and click the green "💚 Recover" button on Node 4.
+  9. Within 1–2 seconds, Node 4 runs an election on recovery and reclaims the "👑 CLUSTER LEADER"
+     badge because Bully election guarantees the highest active ID always wins.
+* WHAT TO TELL THE REVIEWER:
+  "This demonstrates complete self-healing in distributed consensus. When leader Node 4 died,
+   Node 3 detected leader timeout via its watchdog thread and held a Bully election. Since no
+   higher peer answered, Node 3 became the new coordinator. While leader, Node 3's failure
+   detector and repair daemon inspected the gateway replication report, identified under-replicated
+   chunks, and instructed alive nodes via POST /chunks/{id}/pull to re-replicate chunks,
+   bringing under-replicated chunks back to 0. When Node 4 recovered, it immediately triggered
+   an election and reclaimed leadership."
+
+--------------------------------------------------------------------------------
+STEP 7: Automated Test Suite Execution
+--------------------------------------------------------------------------------
+* CONCEPT: Regression Testing & Comprehensive Verification
+* WHAT TO DO:
+  Open a terminal in front of the reviewer and run all three automated smoke test scripts:
+
+  python3 scripts/smoke_test_phase1.py && python3 scripts/smoke_test_phase2.py && python3 scripts/smoke_test_phase3.py
+
+  Show the reviewer the terminal output:
+  - Phase 1: 10/10 PASS (Upload, 512KB split, download byte-match, 400 error rejection, delete)
+  - Phase 2: 6/6 PASS (3MB replication, load balancing spread, Lamport clocks, non-decreasing events)
+  - Phase 3: 7/7 PASS (Leader 4 on startup, fail chunk 0 primary, promotion, repair loop convergence
+             to 0, recover node, fail leader, re-election to node 3, recover node 4 reclaimed,
+             degraded write with 2 nodes dead, full cluster restoration)
+
+
+================================================================================
+4. VIVA Q&A CHEAT SHEET
+================================================================================
+
+Q1: How do Election, Failover, and Repair interact? (The 5-Line Core Answer)
+A:
+1. Election: Nodes run the Bully algorithm where the highest-ID alive node becomes coordinator and broadcasts heartbeats.
+2. Failover: When a node dies, the gateway immediately promotes alive backups to primaries in SQLite, keeping reads alive without timeout delays.
+3. Detection: The elected leader's failure detector probes peers every 2s; 3 consecutive failures confirm a node dead.
+4. Repair: The leader queries the gateway's replication report every 5s and commands target nodes to pull missing chunks from alive sources.
+5. Convergence: Repaired replicas are registered with the gateway, restoring the replication factor to 2 and returning under_replicated_chunks to 0.
+
+Q2: What happens if a file upload arrives when only 1 node is alive?
+A:
+"The gateway detects that fewer than REPLICATION_FACTOR (2) nodes are alive. To prioritize availability,
+it accepts a degraded write (1 replica), stores the chunk on the single alive node, and tags the response
+with 'degraded': true. When other nodes recover, the leader's repair loop automatically detects the
+under-replicated chunk and re-replicates it to restore RF=2."
+
+Q3: Why use Lamport Clocks instead of system timestamps?
+A:
+"Physical clocks across different servers or containers drift (clock skew/NTP sync issues). Lamport
+logical clocks provide a causal partial ordering based on the 'happens-before' relation, ticking on
+send and updating with max(local, received)+1 on ingress. This guarantees a deterministic, reproducible
+order for resolving concurrent write conflicts."
+
+Q4: How does read load balancing work?
+A:
+"Downloads query all alive replicas for each chunk. The gateway calculates:
+ Read Score = reported active requests + local in-flight downloads.
+The chunk is requested from the replica with the lowest score. If a node fails during download,
+it immediately falls back to the next replica without user error."
+
+
+================================================================================
+5. HOW TO UPLOAD THE PROJECT TO GITHUB
+================================================================================
+
+Follow these step-by-step terminal instructions to push the code to your GitHub account:
+
+STEP 5.1: Create a New Repository on GitHub
+1. Log into your GitHub account at https://github.com
+2. Click the "+" icon in the top right corner and select "New repository".
+3. Repository name: distributed-audio-storage  (or any name you prefer)
+4. Description: Distributed Audio File Storage System with Bully Election, Primary-Backup Replication, and Lamport Clocks.
+5. Select "Public" (or "Private" if required by your university).
+6. Leave "Initialize this repository with a README" UNCHECKED (we already have a complete README).
+7. Click "Create repository".
+8. Copy the repository URL (e.g., https://github.com/YOUR_USERNAME/distributed-audio-storage.git).
+
+STEP 5.2: Initialize Git and Commit Locally
+Open your terminal and run:
+
+cd /Users/abhimanyu/DC-Project/audio-storage
+
+# Check that git is not yet initialized:
+git status
+
+# Initialize a new git repository:
+git init
+
+# Configure your git identity (if not already set globally):
+git config user.name "Your Name"
+git config user.email "your_email@example.com"
+
+# Stage all project files (.gitignore is already configured to exclude caches):
+git add .
+
+# Check staged files:
+git status
+
+# Create the initial commit:
+git commit -m "feat: complete Phase 3 distributed audio file storage system"
+
+STEP 5.3: Link Remote and Push to GitHub
+Run the following commands (replace YOUR_USERNAME and YOUR_REPO with your actual GitHub details):
+
+# Rename current branch to main:
+git branch -M main
+
+# Add your GitHub repository as the remote origin:
+git remote add origin https://github.com/YOUR_USERNAME/distributed-audio-storage.git
+
+# Push the codebase to GitHub:
+git push -u origin main
+
+STEP 5.4: Verify on GitHub
+1. Refresh your repository page on GitHub.
+2. Confirm that all folders (gateway, node, frontend, scripts), docker-compose.yml,
+   and README.md are visible.
+3. The README will automatically render with the full architecture diagram,
+   timelines, API reference tables, and lab mapping.
+
+================================================================================
+END OF DEMONSTRATION GUIDE
+================================================================================
