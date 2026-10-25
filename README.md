@@ -1,4 +1,4 @@
-# Distributed Audio File Storage System — Phase 3 (Final)
+# Distributed Audio File Storage System 
 
 > University Distributed Systems Course Project  
 > Complete Implementation (Phase 3 of 3) — Bully Leader Election · Failover & Primary Promotion · Leader-Driven Failure Detection & Re-replication/Repair · Synchronous Primary-Backup Replication · Lamport Logical Clocks & Versioning · Cluster Dashboard & Event Audit Log
@@ -219,19 +219,19 @@ Storage nodes have unique integer IDs `1..4`. The node with the highest alive ID
 5. In the sidebar, select **Client B**, set timestamp override to `11`, and upload `sample.mp3`. Notice Client B's file is now the latest version.
 
 ### Scenario 4: Node Failure & Seamless Playback / Promotion
-1. Go to the **🖥️ Cluster** tab. Find which node is primary for Chunk 0 of an uploaded file (e.g. Node 1).
-2. Click the **💥 Fail** button on Node 1. The status changes to `🔴 FAILED (CRASHED)`.
-3. Return to the **📁 Files** tab and click **▶️ Play**. Playback streams seamlessly without error because the read path immediately fell back to the alive replica.
-4. Expand **🗂️ Chunk map**: the gateway automatically promoted the backup replica to `primary`.
-5. Check the **📜 Event Log** tab for the `promotion` event (`"promoted N chunks from node 1"`).
+1. Go to the ** Cluster** tab. Find which node is primary for Chunk 0 of an uploaded file (e.g. Node 1).
+2. Click the ** Fail** button on Node 1. The status changes to `🔴 FAILED (CRASHED)`.
+3. Return to the ** Files** tab and click ** Play**. Playback streams seamlessly without error because the read path immediately fell back to the alive replica.
+4. Expand ** Chunk map**: the gateway automatically promoted the backup replica to `primary`.
+5. Check the ** Event Log** tab for the `promotion` event (`"promoted N chunks from node 1"`).
 
 ### Scenario 5: Kill the Leader, Bully Re-Election & Automatic Repair
-1. In the **🖥️ Cluster** tab, identify the current leader (Node 4 with the `👑 CLUSTER LEADER` badge).
-2. Click **💥 Fail** on Node 4.
-3. Within 6–10 seconds, watch the **Bully Election** trigger: Node 3 detects the heartbeat timeout and gets elected as the new `👑 CLUSTER LEADER`.
+1. In the ** Cluster** tab, identify the current leader (Node 4 with the `👑 CLUSTER LEADER` badge).
+2. Click ** Fail** on Node 4.
+3. Within 6–10 seconds, watch the **Bully Election** trigger: Node 3 detects the heartbeat timeout and gets elected as the new ` CLUSTER LEADER`.
 4. Look at the **Under-Replicated Chunks** metric: it increases because chunks on Node 4 lost a replica.
 5. Within 5–15 seconds, watch the counter drop back to **0** as the new leader's repair loop re-replicates chunks across the remaining alive nodes.
-6. Click **💚 Recover** on Node 4. Node 4 starts an election upon recovery and wins back leadership (highest ID wins).
+6. Click ** Recover** on Node 4. Node 4 starts an election upon recovery and wins back leadership (highest ID wins).
 
 ---
 
